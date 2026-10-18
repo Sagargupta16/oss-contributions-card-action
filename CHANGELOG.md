@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.1] - 2026-10-18
+
+### Changed
+
+- `action.yml` runs the script through `$GITHUB_ACTION_PATH` instead of interpolating `${{ github.action_path }}` into the shell line, as GitHub's security hardening guide recommends.
+- CI lints with ruff 0.17.1 (was 0.16.6) and tests on Python 3.15 as well as 3.12, 3.13 and 3.14.
+- CI checkouts set `persist-credentials: false`, since no job pushes.
+- README: CI, Marketplace, release and license badges, a Marketplace link, a comparison with hosted stats widgets, and a flow diagram under How it works.
+- README previews regenerated from live data on 2026-10-18.
+- `CONTRIBUTING.md` and `CLAUDE.md` list the new ruff pin and Python matrix.
+
 ## [1.0.0] - 2026-09-25
 
 Initial release.

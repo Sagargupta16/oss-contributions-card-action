@@ -10,14 +10,14 @@ The script is Python standard library only and `action.yml` has no install step,
 
 CI (`.github/workflows/ci.yml`) runs three jobs on every push to `main` and every pull request:
 
-- `lint`: `pip install --only-binary :all: ruff==0.16.6`, then `ruff check .` on Python 3.13
-- `test`: `pip install --only-binary :all: pytest==9.1.1`, then `pytest -v` on Python 3.12, 3.13 and 3.14
+- `lint`: `pip install --only-binary :all: ruff==0.17.1`, then `ruff check .` on Python 3.13
+- `test`: `pip install --only-binary :all: pytest==9.1.1`, then `pytest -v` on Python 3.12, 3.13, 3.14 and 3.15
 - `action`: runs `action.yml` from the checkout against the live search API with `exclude-owners` and `exclude-repos` set, then asserts all four outputs are numbers, all three SVGs parse, and no excluded repository appears on a card
 
 Run the first two locally:
 
 ```bash
-uvx ruff@0.16.6 check .
+uvx ruff@0.17.1 check .
 uv run --no-project --with pytest==9.1.1 pytest -v
 ```
 
