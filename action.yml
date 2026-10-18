@@ -79,4 +79,4 @@ runs:
         OSS_OUTPUT_REVIEW: ${{ inputs.output-review }}
         OSS_MAX_ROWS: ${{ inputs.max-rows }}
         OSS_ACCENT: ${{ inputs.accent }}
-      run: python "${{ github.action_path }}/oss_contributions_card.py"
+      run: python "$GITHUB_ACTION_PATH/oss_contributions_card.py"

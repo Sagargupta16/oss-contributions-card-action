@@ -1,5 +1,10 @@
 # OSS Contributions Card
 
+[![CI](https://github.com/Sagargupta16/oss-contributions-card-action/actions/workflows/ci.yml/badge.svg)](https://github.com/Sagargupta16/oss-contributions-card-action/actions/workflows/ci.yml)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-OSS%20Contributions%20Card-blue?logo=github)](https://github.com/marketplace/actions/oss-contributions-card)
+[![Release](https://img.shields.io/github/v/release/Sagargupta16/oss-contributions-card-action)](https://github.com/Sagargupta16/oss-contributions-card-action/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 A GitHub Action that finds your pull requests to other people's repositories and renders them as animated SVG cards in your own repo. There is no list to maintain: every run searches GitHub, so a pull request shows up when you open it and moves to the merged card when it lands.
 
 It writes three cards:
@@ -10,9 +15,20 @@ It writes three cards:
 
 The cards are committed to your repo, so there is no widget host to run out of quota or go down. Each SVG is self-contained (CSS and SMIL animation only, no scripts, fonts or external images), which is what GitHub needs to render it through an `<img>`.
 
+It is published on the [GitHub Marketplace](https://github.com/marketplace/actions/oss-contributions-card).
+
+## Why an action and not a stats widget
+
+| | Hosted stats widgets | This action |
+| --- | --- | --- |
+| What it shows | Your own repositories, commits, streaks | Pull requests you landed in other people's projects |
+| Where the image lives | A shared server renders it on every view | Committed to your repo by your own scheduled workflow |
+| Rate limits and outages | Shared quota; the card breaks when the host is down | Your own workflow token; a failed run keeps yesterday's cards |
+| Runtime dependencies | The host's stack | Python standard library only |
+
 ## Preview
 
-Live output for [@Sagargupta16](https://github.com/Sagargupta16), rendered on 2026-09-25 with `exclude-owners: MCA-NITW` and five one-line list repositories in `exclude-repos`:
+Live output for [@Sagargupta16](https://github.com/Sagargupta16), rendered on 2026-10-18 with `exclude-owners: MCA-NITW` and five one-line list repositories in `exclude-repos`:
 
 ![Open source summary: merged upstream, in review, projects and combined stars](examples/oss.svg)
 
@@ -115,6 +131,17 @@ If you exclude anything, add the same exclusions to each link so the search list
 When the GitHub API fails and the action keeps your existing cards, it sets no outputs, so all four are empty strings.
 
 ## How it works
+
+```mermaid
+flowchart LR
+    cron["Your workflow<br/>(schedule or manual)"] --> action["oss_contributions_card.py<br/>(composite action, Python stdlib)"]
+    action -- "search: is:pr is:merged / is:open<br/>100 per page, up to 1000" --> gql[("GitHub GraphQL API")]
+    gql --> filter["Drop own repos, private repos,<br/>exclude-owners, exclude-repos"]
+    filter --> render["Render summary, merged<br/>and in-review SVGs"]
+    render --> write["Write a card only if it changed"]
+    write --> commit["Your workflow commits<br/>assets/*.svg"]
+    gql -. "API error" .-> keep["Keep existing cards,<br/>warn, exit 0"]
+```
 
 1. Runs two GitHub GraphQL searches, `is:pr author:USER is:merged -user:USER` and the same with `is:open`, following the cursor 100 results at a time.
 2. Drops pull requests to repositories you own, to anything matched by `exclude-owners` or `exclude-repos` (case-insensitive), and to private repositories, even when the token can see them.

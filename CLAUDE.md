@@ -16,7 +16,7 @@ Built 2026-09-25 to publish as `Sagargupta16/oss-contributions-card-action@v1`. 
 
 ## Stack
 
-- **Language**: Python, stdlib only. `action.yml` installs 3.13; CI tests 3.12, 3.13 and 3.14
+- **Language**: Python, stdlib only. `action.yml` installs 3.13; CI tests 3.12, 3.13, 3.14 and 3.15
 - **Framework**: GitHub Actions composite action (`action.yml`)
 - **Database**: none
 - **Package manager**: none (nothing to install); `uv`/`uvx` for local lint and tests
@@ -39,13 +39,13 @@ GITHUB_TOKEN=$(gh auth token) OSS_USERNAME=Sagargupta16 OSS_EXCLUDE_OWNERS=MCA-N
 ## Test
 
 ```
-uvx ruff@0.16.6 check .
+uvx ruff@0.17.1 check .
 uv run --no-project --with pytest==9.1.1 pytest -v
 ```
 
 `test_oss_contributions_card.py` never touches the network: every test monkeypatches `fetch` (or calls the pure functions directly). It covers the query string, cursor pagination, the page cap, duplicate results, GraphQL errors, the https allowlist, owner, repository (exact, `owner/*`, case, empty input) and private-repo exclusion, star ranking, the `+N more` chip, grouping, max-rows, empty cards, SVG validity, escaping, dash and emoji normalization, config validation, `$GITHUB_OUTPUT`, and the keep-existing-cards fallback for five failure shapes.
 
-`.github/workflows/ci.yml` runs three jobs on every push to `main` and every PR: `lint` (ruff), `test` (pytest on 3.12/3.13/3.14) and `action`, the only job that loads `action.yml`. It runs `uses: ./` as Sagargupta16 with the workflow token, `exclude-owners: MCA-NITW` and the job-level `EXCLUDE_REPOS` list as `exclude-repos`, then asserts all four outputs are numbers, all three SVGs parse, and no excluded repository appears on a card. `ruff==0.16.6` and `pytest==9.1.1` are pinned inline, because Renovate does not read `run:` blocks; bump them by hand, the same way as in `credly-badge-readme-action`. There is no `ruff.toml` on purpose: the tree passes ruff's full default ruleset.
+`.github/workflows/ci.yml` runs three jobs on every push to `main` and every PR: `lint` (ruff), `test` (pytest on 3.12/3.13/3.14/3.15) and `action`, the only job that loads `action.yml`. It runs `uses: ./` as Sagargupta16 with the workflow token, `exclude-owners: MCA-NITW` and the job-level `EXCLUDE_REPOS` list as `exclude-repos`, then asserts all four outputs are numbers, all three SVGs parse, and no excluded repository appears on a card. `ruff==0.17.1` and `pytest==9.1.1` are pinned inline, because Renovate does not read `run:` blocks; bump them by hand, the same way as in `credly-badge-readme-action`. There is no `ruff.toml` on purpose: the tree passes ruff's full default ruleset.
 
 ## Entry points
 

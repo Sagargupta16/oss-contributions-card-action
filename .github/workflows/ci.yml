@@ -13,12 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       # Pinned by hand: Renovate does not read versions inside a `run:` block.
       - name: Install ruff
-        run: "pip install --only-binary :all: ruff==0.16.6"
+        run: "pip install --only-binary :all: ruff==0.17.1"
       - name: Lint
         run: ruff check .
 
@@ -28,9 +30,11 @@ jobs:
       fail-fast: false
       matrix:
         # 3.13 is what action.yml installs for consumers, so it must be covered.
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -49,6 +53,8 @@ jobs:
       EXCLUDE_REPOS: "firstcontributions/first-contributions,emmabostian/developer-portfolios,is-a-dev/register,ossamamehmood/Hacktoberfest,SimplifyJobs/Summer2027-Internships"
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Run the action from this checkout
         id: cards
