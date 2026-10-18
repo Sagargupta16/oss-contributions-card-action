@@ -163,6 +163,18 @@ class Config:
     commit_message: str = COMMIT_MESSAGE
 
 
+def _whole_number(
+    env: Mapping[str, str], name: str, default: str, pattern: str, label: str, low: int
+) -> int:
+    """Read an ASCII whole-number input, or raise ConfigError naming its floor."""
+    value = (env.get(name) or default).strip()
+    if not re.fullmatch(pattern, value, re.ASCII):
+        raise ConfigError(
+            f"{label} must be a whole number of {low} or more, got {value!r}"
+        )
+    return int(value)
+
+
 def load_config(env: Mapping[str, str]) -> Config:
     """Read the action inputs from the environment, or raise ConfigError."""
     username = env.get("OSS_USERNAME", "").strip()
@@ -183,9 +195,7 @@ def load_config(env: Mapping[str, str]) -> Config:
     }
     if not outputs:
         raise ConfigError("every output path is empty, so there is nothing to render")
-    rows = (env.get("OSS_MAX_ROWS") or "12").strip()
-    if not re.fullmatch(r"[1-9][0-9]*", rows):
-        raise ConfigError(f"max-rows must be a whole number of 1 or more, got {rows!r}")
+    rows = _whole_number(env, "OSS_MAX_ROWS", "12", r"[1-9]\d*", "max-rows", 1)
     accent = env.get("OSS_ACCENT", "").strip().lower()
     if accent and not HEX_COLOR.fullmatch(accent):
         raise ConfigError(f"accent must be a hex color like #a78bfa, got {accent!r}")
@@ -200,11 +210,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         raise ConfigError(
             f"exclude-repos entries must be owner/repo or owner/*, got {', '.join(map(repr, bad))}"
         )
-    min_stars = (env.get("OSS_MIN_STARS") or "0").strip()
-    if not re.fullmatch(r"[0-9]+", min_stars):
-        raise ConfigError(
-            f"min-stars must be a whole number of 0 or more, got {min_stars!r}"
-        )
+    min_stars = _whole_number(env, "OSS_MIN_STARS", "0", r"\d+", "min-stars", 0)
     commit = (env.get("OSS_COMMIT") or "false").strip().lower()
     if commit not in ("true", "false"):
         raise ConfigError(f"commit must be true or false, got {commit!r}")
@@ -215,9 +221,9 @@ def load_config(env: Mapping[str, str]) -> Config:
         exclude_owners=frozenset(o.strip() for o in owners if o.strip()),
         exclude_repos=frozenset(repos),
         outputs=outputs,
-        max_rows=int(rows),
+        max_rows=rows,
         accent=accent,
-        min_stars=int(min_stars),
+        min_stars=min_stars,
         commit=commit == "true",
         commit_message=message,
     )
@@ -621,21 +627,28 @@ def wrap_text(
             continue
         if current:
             lines.append(current)
-            current = ""
-        # break after "/", "-", "_" or "." first, and between letters only
-        # where no separator fits
-        for piece in re.findall(r"[^/\-_.]+[/\-_.]*|[/\-_.]+", word):
-            if current and text_width(current + piece, size, mono) > width:
-                lines.append(current)
-                current = ""
-            for character in piece:
-                if current and text_width(current + character, size, mono) > width:
-                    lines.append(current)
-                    current = ""
-                current += character
+        *full, current = _break_word(word, width, size, mono)
+        lines.extend(full)
     if current:
         lines.append(current)
     return lines
+
+
+def _break_word(word: str, width: float, size: float, mono: bool) -> list[str]:
+    """Split a word too long for one line; the last piece stays open for the next word."""
+    lines, current = [], ""
+    # break after "/", "-", "_" or "." first, and between letters only
+    # where no separator fits
+    for piece in re.findall(r"[^/\-_.]+[/\-_.]*|[/\-_.]+", word):
+        if current and text_width(current + piece, size, mono) > width:
+            lines.append(current)
+            current = ""
+        for character in piece:
+            if current and text_width(current + character, size, mono) > width:
+                lines.append(current)
+                current = ""
+            current += character
+    return [*lines, current]
 
 
 def _phone_text(
@@ -676,11 +689,11 @@ class PhoneCard:
             yield
         finally:
             self._depth -= 1
-        if self._depth == 0 and len(self.parts) > start:
-            body = "".join(self.parts[start:])
-            del self.parts[start:]
-            self.parts.append(_enter(self.begin, body))
-            self.begin = min(self.begin + step, LAST_START)
+            if self._depth == 0 and len(self.parts) > start:
+                body = "".join(self.parts[start:])
+                del self.parts[start:]
+                self.parts.append(_enter(self.begin, body))
+                self.begin = min(self.begin + step, LAST_START)
 
     def lines(
         self,
