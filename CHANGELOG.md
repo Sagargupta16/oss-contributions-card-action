@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0] - 2026-10-18
+
+### Added
+
+- Phone layouts. Every card is now also rendered 320px wide (`assets/oss-mobile.svg`, `assets/oss-merged-mobile.svg`, `assets/oss-review-mobile.svg`), ported from the profile README's `mobile_cards.py`: tiles two by two, wrapped titles instead of clipped ones, the newest six merged pull requests, the top five repositories in review and the top 12 project chips, with the same entrance, pulse and shine motion. New inputs `output-summary-mobile`, `output-merged-mobile` and `output-review-mobile`; an empty string skips a card. The README embed snippet uses `<picture>` to pick them below 600px.
+- `commit` and `commit-message` inputs. With `commit: true` the action commits only the changed cards as `github-actions[bot]` and pushes them to the checked-out branch, rebasing and retrying once if the branch moved. A detached HEAD (a `pull_request` run) prints a warning and commits nothing. The Quick start is now one step.
+- `min-stars` input: repositories with fewer stars are left out of every card, the counts and the outputs.
+- A run summary: each run writes the counts, how many pull requests were left out, and a Markdown table of every merged and in-review pull request to `$GITHUB_STEP_SUMMARY`.
+
+### Fixed
+
+- Project chips for repositories with a million or more stars read `1.2M` instead of `1200.0K`.
+
+### Changed
+
+- CI's `action` job checks that all six cards parse and keep excluded repositories off.
+- README previews switch to the phone layouts on narrow screens, regenerated from live data on 2026-10-18.
+
 ## [1.0.1] - 2026-10-18
 
 ### Changed
