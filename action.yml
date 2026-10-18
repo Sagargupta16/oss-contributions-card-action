@@ -35,6 +35,18 @@ inputs:
     description: "Path of the in-review card. An empty string skips it"
     required: false
     default: "assets/oss-review.svg"
+  output-summary-mobile:
+    description: "Path of the 320px phone layout of the summary card. An empty string skips it"
+    required: false
+    default: "assets/oss-mobile.svg"
+  output-merged-mobile:
+    description: "Path of the 320px phone layout of the merged card. An empty string skips it"
+    required: false
+    default: "assets/oss-merged-mobile.svg"
+  output-review-mobile:
+    description: "Path of the 320px phone layout of the in-review card. An empty string skips it"
+    required: false
+    default: "assets/oss-review-mobile.svg"
   max-rows:
     description: "Most rows on each list card; the rest are summed in a footer line"
     required: false
@@ -43,6 +55,18 @@ inputs:
     description: "Hex color for the summary card's heading and project chips, for example #a78bfa. Empty keeps the stock blue"
     required: false
     default: ""
+  min-stars:
+    description: "Leave out repositories with fewer stars than this, for example 50. 0 keeps every repository"
+    required: false
+    default: "0"
+  commit:
+    description: "true to commit the changed cards as github-actions[bot] and push them to the checked-out branch. Needs permissions contents write"
+    required: false
+    default: "false"
+  commit-message:
+    description: "Commit message used when commit is true"
+    required: false
+    default: "chore: refresh oss contribution cards"
 
 outputs:
   merged:
@@ -77,6 +101,12 @@ runs:
         OSS_OUTPUT_SUMMARY: ${{ inputs.output-summary }}
         OSS_OUTPUT_MERGED: ${{ inputs.output-merged }}
         OSS_OUTPUT_REVIEW: ${{ inputs.output-review }}
+        OSS_OUTPUT_SUMMARY_MOBILE: ${{ inputs.output-summary-mobile }}
+        OSS_OUTPUT_MERGED_MOBILE: ${{ inputs.output-merged-mobile }}
+        OSS_OUTPUT_REVIEW_MOBILE: ${{ inputs.output-review-mobile }}
         OSS_MAX_ROWS: ${{ inputs.max-rows }}
         OSS_ACCENT: ${{ inputs.accent }}
+        OSS_MIN_STARS: ${{ inputs.min-stars }}
+        OSS_COMMIT: ${{ inputs.commit }}
+        OSS_COMMIT_MESSAGE: ${{ inputs.commit-message }}
       run: python "$GITHUB_ACTION_PATH/oss_contributions_card.py"

@@ -1,6 +1,6 @@
 # Contributing to oss-contributions-card-action
 
-This repo is a composite GitHub Action that finds your pull requests to other people's repositories and renders three self-hosted, animated SVG cards: a summary, the merged list and the in-review list. Bug reports, fixes, doc corrections and new inputs that come with tests are welcome.
+This repo is a composite GitHub Action that finds your pull requests to other people's repositories and renders three self-hosted, animated SVG cards, each in a desktop and a phone layout: a summary, the merged list and the in-review list. Bug reports, fixes, doc corrections and new inputs that come with tests are welcome.
 
 ## Setup
 
@@ -12,7 +12,7 @@ CI (`.github/workflows/ci.yml`) runs three jobs on every push to `main` and ever
 
 - `lint`: `pip install --only-binary :all: ruff==0.17.1`, then `ruff check .` on Python 3.13
 - `test`: `pip install --only-binary :all: pytest==9.1.1`, then `pytest -v` on Python 3.12, 3.13, 3.14 and 3.15
-- `action`: runs `action.yml` from the checkout against the live search API with `exclude-owners` and `exclude-repos` set, then asserts all four outputs are numbers, all three SVGs parse, and no excluded repository appears on a card
+- `action`: runs `action.yml` from the checkout against the live search API with `exclude-owners` and `exclude-repos` set, then asserts all four outputs are numbers, all six SVGs parse, and no excluded repository appears on a card
 
 Run the first two locally:
 
@@ -29,11 +29,11 @@ To render the cards by hand, pass a token inline and never echo it:
 GITHUB_TOKEN=$(gh auth token) OSS_USERNAME=<login> python oss_contributions_card.py
 ```
 
-That writes `assets/oss.svg`, `assets/oss-merged.svg` and `assets/oss-review.svg` unless `OSS_OUTPUT_SUMMARY`, `OSS_OUTPUT_MERGED` and `OSS_OUTPUT_REVIEW` point elsewhere. Do not commit them. The previews in `examples/` are generated from live data; never edit them by hand.
+That writes `assets/oss.svg`, `assets/oss-merged.svg`, `assets/oss-review.svg` and their `-mobile` phone layouts unless the `OSS_OUTPUT_*` variables point elsewhere. Do not commit them. The previews in `examples/` are generated from live data; never edit them by hand.
 
 ## Conventions
 
-- Tests live in `test_oss_contributions_card.py` at the repo root and never touch the network: every test monkeypatches `fetch` or calls the pure functions directly.
+- Tests live in `test_oss_contributions_card.py` at the repo root and never touch the network: every test monkeypatches `fetch` or calls the pure functions directly. The `commit` tests run real `git` against a bare repository in a temporary directory, with `GIT_CONFIG_GLOBAL` pointed at a throwaway file so your own git config stays out.
 - A new input touches three places in sync: `inputs` in `action.yml`, the `env` block in `action.yml`, and `load_config` in the script.
 - The username env var is `OSS_USERNAME`, never `USERNAME`, because Windows already sets `USERNAME`.
 - Composite outputs need a `value:` mapping to `steps.render.outputs.<name>` and `id: render` on the step.

@@ -1,8 +1,10 @@
 """Render animated SVG cards of your pull requests to other people's repositories.
 
 Finds your merged and open pull requests with the GitHub GraphQL search API,
-drops repositories you own, private repositories, and anything matched by
-OSS_EXCLUDE_OWNERS or OSS_EXCLUDE_REPOS, then writes up to three SVG cards:
+drops repositories you own, private repositories, repositories under
+OSS_MIN_STARS, and anything matched by OSS_EXCLUDE_OWNERS or OSS_EXCLUDE_REPOS,
+then writes up to three SVG cards, each in an 840px desktop layout and a 320px
+phone layout:
 
 - a summary: merged upstream, in review, projects contributed to, combined
   stars, and a chip per project ranked by stars
@@ -11,6 +13,9 @@ OSS_EXCLUDE_OWNERS or OSS_EXCLUDE_REPOS, then writes up to three SVG cards:
 
 GitHub serves README images through an <img>, so every card is self-contained:
 no scripts, no external fonts or images, CSS and SMIL animation only.
+
+Inside Actions it also writes a Markdown table of every pull request to the
+run's step summary, and with OSS_COMMIT=true it commits and pushes the cards.
 
 If the API fails, the cards already on disk are kept and the run exits 0, so a
 flaky API never blanks a README. With no earlier card to keep it exits 1.
@@ -24,12 +29,16 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import os
 import re
+import subprocess
 import sys
+import unicodedata
 import urllib.request
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
@@ -54,7 +63,14 @@ OUTPUTS = (
     ("summary", "OSS_OUTPUT_SUMMARY", "assets/oss.svg"),
     ("merged", "OSS_OUTPUT_MERGED", "assets/oss-merged.svg"),
     ("review", "OSS_OUTPUT_REVIEW", "assets/oss-review.svg"),
+    ("summary-mobile", "OSS_OUTPUT_SUMMARY_MOBILE", "assets/oss-mobile.svg"),
+    ("merged-mobile", "OSS_OUTPUT_MERGED_MOBILE", "assets/oss-merged-mobile.svg"),
+    ("review-mobile", "OSS_OUTPUT_REVIEW_MOBILE", "assets/oss-review-mobile.svg"),
 )
+COMMIT_MESSAGE = "chore: refresh oss contribution cards"
+# The identity actions/checkout documents for commits made by the workflow token.
+BOT_NAME = "github-actions[bot]"
+BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 
 # A login goes into the search query, so nothing else may: no spaces, no colons.
 LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
@@ -142,6 +158,21 @@ class Config:
     outputs: dict[str, Path]
     max_rows: int
     accent: str
+    min_stars: int = 0
+    commit: bool = False
+    commit_message: str = COMMIT_MESSAGE
+
+
+def _whole_number(
+    env: Mapping[str, str], name: str, default: str, pattern: str, label: str, low: int
+) -> int:
+    """Read an ASCII whole-number input, or raise ConfigError naming its floor."""
+    value = (env.get(name) or default).strip()
+    if not re.fullmatch(pattern, value, re.ASCII):
+        raise ConfigError(
+            f"{label} must be a whole number of {low} or more, got {value!r}"
+        )
+    return int(value)
 
 
 def load_config(env: Mapping[str, str]) -> Config:
@@ -164,9 +195,7 @@ def load_config(env: Mapping[str, str]) -> Config:
     }
     if not outputs:
         raise ConfigError("every output path is empty, so there is nothing to render")
-    rows = (env.get("OSS_MAX_ROWS") or "12").strip()
-    if not re.fullmatch(r"[1-9][0-9]*", rows):
-        raise ConfigError(f"max-rows must be a whole number of 1 or more, got {rows!r}")
+    rows = _whole_number(env, "OSS_MAX_ROWS", "12", r"[1-9]\d*", "max-rows", 1)
     accent = env.get("OSS_ACCENT", "").strip().lower()
     if accent and not HEX_COLOR.fullmatch(accent):
         raise ConfigError(f"accent must be a hex color like #a78bfa, got {accent!r}")
@@ -181,14 +210,22 @@ def load_config(env: Mapping[str, str]) -> Config:
         raise ConfigError(
             f"exclude-repos entries must be owner/repo or owner/*, got {', '.join(map(repr, bad))}"
         )
+    min_stars = _whole_number(env, "OSS_MIN_STARS", "0", r"\d+", "min-stars", 0)
+    commit = (env.get("OSS_COMMIT") or "false").strip().lower()
+    if commit not in ("true", "false"):
+        raise ConfigError(f"commit must be true or false, got {commit!r}")
+    message = (env.get("OSS_COMMIT_MESSAGE") or "").strip() or COMMIT_MESSAGE
     return Config(
         username=username,
         token=token,
         exclude_owners=frozenset(o.strip() for o in owners if o.strip()),
         exclude_repos=frozenset(repos),
         outputs=outputs,
-        max_rows=int(rows),
+        max_rows=rows,
         accent=accent,
+        min_stars=min_stars,
+        commit=commit == "true",
+        commit_message=message,
     )
 
 
@@ -284,11 +321,13 @@ def select_upstream(
     username: str,
     exclude_owners: Iterable[str],
     exclude_repos: Iterable[str] = (),
+    min_stars: int = 0,
 ) -> list[PullRequest]:
     """Return the pull requests to public repositories someone else owns, minus exclusions.
 
     Every comparison is case-insensitive. An exclude_repos entry is owner/repo,
-    or owner/* to drop every repository of that owner.
+    or owner/* to drop every repository of that owner. Repositories with fewer
+    than min_stars stars are dropped too.
     """
     owners = {o.lower() for o in exclude_owners} | {username.lower()}
     repos: set[str] = set()
@@ -304,6 +343,7 @@ def select_upstream(
         if not pr.private
         and pr.owner.lower() not in owners
         and pr.repo.lower() not in repos
+        and pr.stars >= min_stars
     ]
 
 
@@ -361,7 +401,9 @@ def _oss_chip_label(repo: str, count: int, stars: int) -> str:
     label = _clip(repo, 60)
     if count > 1:
         label += f"  x{count}"
-    if stars >= 1000:
+    if stars >= 1_000_000:
+        label += f"  {stars / 1_000_000:.1f}M"
+    elif stars >= 1000:
         label += f"  {stars / 1000:.1f}K"
     elif stars:
         label += f"  {stars}"
@@ -509,15 +551,20 @@ def _numbers(prs: list[PullRequest]) -> str:
     return ", ".join(labels)
 
 
-def render_review(open_prs: list[PullRequest], max_rows: int) -> str:
-    """Return the in-review card: one row per repository, most open pull requests first."""
+def _by_repository(open_prs: list[PullRequest]) -> list[list[PullRequest]]:
+    """Group open pull requests by repository, most open pull requests first."""
     grouped: dict[str, list[PullRequest]] = {}
     for pr in sorted(open_prs, key=lambda pr: pr.number):
         grouped.setdefault(pr.repo, []).append(pr)
-    ordered = sorted(
+    return sorted(
         grouped.values(),
         key=lambda prs: (-len(prs), -prs[0].stars, prs[0].repo.lower()),
     )
+
+
+def render_review(open_prs: list[PullRequest], max_rows: int) -> str:
+    """Return the in-review card: one row per repository, most open pull requests first."""
+    ordered = _by_repository(open_prs)
     rows = [
         (prs[0].repo, "; ".join(pr.title for pr in prs), _numbers(prs))
         for prs in ordered[:max_rows]
@@ -529,6 +576,432 @@ def render_review(open_prs: list[PullRequest], max_rows: int) -> str:
     hidden = sum(len(prs) for prs in ordered[max_rows:])
     footer = f"+{_plural(hidden, 'more pull request')} in review" if hidden else ""
     return render_list_card(kicker, rows, AMBER, footer)
+
+
+# ---------------------------------------------------------------- phone cards
+
+# The phone layouts come from the profile README's mobile_cards.py: a 320px
+# column that a <picture> source picks below 600px, so text renders near its
+# real size on a phone instead of an 840px card scaled down. Text wraps instead
+# of clipping, blocks fade and rise in order, the accent bar pulses and a shine
+# sweeps the card.
+PHONE_W, PHONE_PAD, PHONE_BODY = 320, 18, 15
+PHONE_CONTENT = PHONE_W - 2 * PHONE_PAD
+WHITE, MUTED, BORDER = "#f3f4f6", "#b1bfcc", "#26343d"
+LEADING = 0.38  # gap below each line, as a share of its font size
+STAGGER, FADE, LAST_START = 0.1, 0.45, 2.4
+PHONE_MERGED_ROWS, PHONE_REVIEW_ROWS, PHONE_CHIPS = 6, 5, 12
+
+
+def _advance(character: str) -> float:
+    """Return a conservative sans-serif glyph width, as a share of the font size."""
+    if unicodedata.combining(character):
+        return 0
+    if unicodedata.east_asian_width(character) in {"W", "F"}:
+        return 1.05
+    if character in "W@%M":
+        return 1
+    if character in "ilI.,:;'!|`":
+        return 0.34
+    if character in " fjrt()[]":
+        return 0.44
+    return 0.7 if character.isupper() else 0.58
+
+
+def text_width(text: str, size: float = PHONE_BODY, mono: bool = False) -> float:
+    """Measure text conservatively: sans glyph advances, or monospace plus tracking."""
+    if mono:
+        return len(text) * (size * 0.6 + 1)
+    return sum(_advance(character) for character in text) * size
+
+
+def wrap_text(
+    text: str, width: float, size: float = PHONE_BODY, mono: bool = False
+) -> list[str]:
+    """Wrap words to a width, splitting a token too long for one line without dropping any of it."""
+    lines, current = [], ""
+    for word in str(text).split():
+        candidate = f"{current} {word}" if current else word
+        if text_width(candidate, size, mono) <= width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        *full, current = _break_word(word, width, size, mono)
+        lines.extend(full)
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _break_word(word: str, width: float, size: float, mono: bool) -> list[str]:
+    """Split a word too long for one line; the last piece stays open for the next word."""
+    lines, current = [], ""
+    # break after "/", "-", "_" or "." first, and between letters only
+    # where no separator fits
+    for piece in re.findall(r"[^/\-_.]+[/\-_.]*|[/\-_.]+", word):
+        if current and text_width(current + piece, size, mono) > width:
+            lines.append(current)
+            current = ""
+        for character in piece:
+            if current and text_width(current + character, size, mono) > width:
+                lines.append(current)
+                current = ""
+            current += character
+    return [*lines, current]
+
+
+def _phone_text(
+    x: float, y: float, size: float, weight: int, color: str, text: str, mono: bool
+) -> str:
+    font = f' font-family="{MONO}" letter-spacing="1"' if mono else ""
+    return (
+        f'<text x="{x:g}" y="{y:g}" font-size="{size:g}" font-weight="{weight}" '
+        f'fill="{color}"{font}>{escape(text)}</text>'
+    )
+
+
+def _enter(begin: float, body: str) -> str:
+    """Fade in while rising 10px, once, then hold."""
+    return (
+        f'<g opacity="0"><animate attributeName="opacity" to="1" begin="{begin:.2f}s" dur="{FADE}s" fill="freeze"/>'
+        f'<animateTransform attributeName="transform" type="translate" from="0 10" to="0 0" '
+        f'begin="{begin:.2f}s" dur="{FADE}s" fill="freeze"/>{body}</g>'
+    )
+
+
+class PhoneCard:
+    """One phone card: a column of staggered blocks inside the shared frame."""
+
+    def __init__(self, name: str, accent: str) -> None:
+        self.name, self.accent = name, accent
+        self.parts: list[str] = []
+        self.y: float = PHONE_PAD
+        self.begin = 0.15
+        self._depth = 0
+
+    @contextmanager
+    def block(self, step: float = STAGGER) -> Iterator[None]:
+        """Draw everything inside as one entrance, after the previous block."""
+        start = len(self.parts)
+        self._depth += 1
+        try:
+            yield
+        finally:
+            self._depth -= 1
+            if self._depth == 0 and len(self.parts) > start:
+                body = "".join(self.parts[start:])
+                del self.parts[start:]
+                self.parts.append(_enter(self.begin, body))
+                self.begin = min(self.begin + step, LAST_START)
+
+    def lines(
+        self,
+        text: str,
+        *,
+        x: float = PHONE_PAD,
+        y: float | None = None,
+        width: float = PHONE_CONTENT,
+        size: float = PHONE_BODY,
+        color: str = WHITE,
+        weight: int = 500,
+        mono: bool = False,
+    ) -> float:
+        """Write wrapped text from y (default: the cursor) and return the y below it."""
+        cursor = self.y if y is None else y
+        with self.block():
+            for line in wrap_text(text, width, size, mono):
+                cursor += size
+                self.parts.append(
+                    _phone_text(x, cursor, size, weight, color, line, mono)
+                )
+                cursor += size * LEADING
+        if y is None:
+            self.y = cursor
+        return cursor
+
+    def label(self, text: str) -> None:
+        """Write a mono micro-label in the accent color."""
+        self.lines(text.upper(), size=11, color=self.accent, weight=700, mono=True)
+        self.y += 8
+
+    def divider(self) -> None:
+        """Draw a hairline across the card that strokes in from the left."""
+        self.y += 6
+        with self.block():
+            self.parts.append(
+                f'<path d="M{PHONE_PAD} {self.y:g}H{PHONE_W - PHONE_PAD}" stroke="{BORDER}" '
+                'stroke-width="1" fill="none" pathLength="1" stroke-dasharray="1">'
+                f'<animate attributeName="stroke-dashoffset" values="1;0" begin="{self.begin:.2f}s" '
+                'dur="0.6s" fill="freeze"/></path>'
+            )
+        self.y += 14
+
+    def row(self, title: str, detail: str = "", meta: str = "") -> None:
+        """Write a bulleted row: bold title, mono meta in the accent color, muted detail."""
+        x = PHONE_PAD + 14
+        width = PHONE_W - PHONE_PAD - x
+        with self.block():
+            self.parts.append(
+                f'<circle cx="{PHONE_PAD + 3}" cy="{self.y + 14 * 0.65:g}" r="2.5" fill="{self.accent}"/>'
+            )
+            self.lines(title, x=x, width=width, size=14, weight=650)
+            if meta:
+                self.y += 3
+                self.lines(
+                    meta.upper(),
+                    x=x,
+                    width=width,
+                    size=10.5,
+                    color=self.accent,
+                    weight=700,
+                    mono=True,
+                )
+            if detail:
+                self.y += 3
+                self.lines(detail, x=x, width=width, size=13.5, color=MUTED)
+        self.y += 12
+
+    def metrics(self, items: list[tuple[str, str]]) -> None:
+        """Lay out value-and-label tiles two to a row."""
+        gap, inset = 10, 10
+        tile = (PHONE_CONTENT - gap) / 2
+        inner = tile - 2 * inset
+        for index in range(0, len(items), 2):
+            group = items[index : index + 2]
+            height = max(
+                22
+                + len(wrap_text(value, inner, 22)) * 22 * (1 + LEADING)
+                + len(wrap_text(label, inner, 12)) * 12 * (1 + LEADING)
+                for value, label in group
+            )
+            for column, (value, label) in enumerate(group):
+                x = PHONE_PAD + column * (tile + gap)
+                with self.block():
+                    self.parts.append(
+                        f'<rect x="{x:g}" y="{self.y:g}" width="{tile:g}" '
+                        f'height="{height:g}" rx="10" fill="{CARD}" stroke="{BORDER}"/>'
+                    )
+                    bottom = self.lines(
+                        value,
+                        x=x + inset,
+                        y=self.y + 8,
+                        width=inner,
+                        size=22,
+                        color=self.accent,
+                        weight=750,
+                    )
+                    self.lines(
+                        label,
+                        x=x + inset,
+                        y=bottom + 2,
+                        width=inner,
+                        size=12,
+                        color=MUTED,
+                    )
+            self.y += height + gap
+
+    def chips(self, labels: list[str], tint: str, size: float = 10.5) -> None:
+        """Lay out mono chips in rows; a label wider than the card wraps inside its chip."""
+        x, line_bottom = float(PHONE_PAD), self.y
+        for label in labels:
+            chip_width = min(PHONE_CONTENT, text_width(label, size, True) + 18)
+            # 2px of slack so a label measured to fit never wraps inside its own chip
+            rows = len(wrap_text(label, chip_width - 16, size, True))
+            chip_height = rows * size * (1 + LEADING) + 10
+            if x + chip_width > PHONE_W - PHONE_PAD:
+                x, self.y = float(PHONE_PAD), line_bottom + 6
+            with self.block(step=0.04):
+                self.parts.append(
+                    f'<rect x="{x:g}" y="{self.y:g}" width="{chip_width:g}" '
+                    f'height="{chip_height:g}" rx="8" fill="{tint}12" stroke="{tint}44"/>'
+                )
+                self.lines(
+                    label,
+                    x=x + 9,
+                    y=self.y + 4,
+                    width=chip_width - 16,
+                    size=size,
+                    color="rgba(255,255,255,0.85)",
+                    mono=True,
+                )
+            line_bottom = max(line_bottom, self.y + chip_height)
+            x += chip_width + 6
+        self.y = line_bottom + 12
+
+    def finish(self) -> str:
+        """Close the card: frame, pulsing accent bar, the blocks, then a repeating shine."""
+        height = int(self.y + PHONE_PAD + 0.999)
+        # skewX(-18) leans the shine left as it goes down, so tall cards travel further
+        sweep = PHONE_W + 280 + math.ceil(height * 0.33)
+        return (
+            svg_open(PHONE_W, height, self.name)
+            + f"<title>{escape(self.name)}</title>"
+            + f"<style>text{{font-family:{SANS};font-variant-numeric:tabular-nums}}</style>"
+            + '<defs><linearGradient id="shine" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/>'
+            '<stop offset="0.5" stop-color="#fff" stop-opacity="0.06"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>'
+            f'<clipPath id="card"><rect x="1" y="1" width="{PHONE_W - 2}" height="{height - 2}" rx="14"/></clipPath></defs>'
+            f'<rect x=".5" y=".5" width="{PHONE_W - 1}" height="{height - 1}" rx="14" fill="{BG}" stroke="{BORDER}"/>'
+            f'<rect x="0" y="20" width="3" height="26" rx="1.5" fill="{self.accent}">'
+            '<animate attributeName="opacity" values="1;0.4;1" dur="3s" repeatCount="indefinite"/></rect>'
+            + "".join(self.parts)
+            + f'<g clip-path="url(#card)"><rect x="-140" y="0" width="120" height="{height}" '
+            'fill="url(#shine)" transform="skewX(-18)">'
+            f'<animateTransform attributeName="transform" type="translate" values="0 0;{sweep} 0" '
+            f'dur="7s" begin="{self.begin + 0.5:.2f}s" repeatCount="indefinite" additive="sum"/></rect></g>'
+            + SVG_CLOSE
+        )
+
+
+def render_summary_mobile(
+    merged: list[PullRequest], open_prs: list[PullRequest], accent: str = ""
+) -> str:
+    """Return the phone summary: four tiles two by two, then a chip per project by stars."""
+    ranked = projects(merged)
+    reach = sum(stars for _, stars in ranked.values())
+    card = PhoneCard(
+        f"Open source: {len(merged)} merged upstream, {len(open_prs)} in review, across {len(ranked)} projects",
+        accent or BLUE_LIGHT,
+    )
+    card.label("Open source | merged upstream")
+    card.metrics(
+        [
+            (str(len(merged)), "Merged upstream"),
+            (str(len(open_prs)), "In review"),
+            (str(len(ranked)), "Projects contributed to"),
+            (_compact(reach), "Combined stars"),
+        ]
+    )
+    if not ranked:
+        card.lines(
+            "No merged pull requests yet. Projects show up here as your work lands.",
+            size=13.5,
+            color=MUTED,
+        )
+        return card.finish()
+    labels = [_oss_chip_label(r, count, stars) for r, (count, stars) in ranked.items()]
+    shown = labels[:PHONE_CHIPS]
+    if len(labels) > len(shown):
+        shown.append(f"+{len(labels) - len(shown)} more")
+    card.label("Merged into")
+    card.chips(shown, accent or SKY)
+    return card.finish()
+
+
+def _phone_list(
+    kicker: str,
+    rows: list[tuple[str, str, str]],
+    accent: str,
+    footer: str,
+) -> str:
+    """Return a phone list card: one bulleted row per entry, then an optional footer."""
+    card = PhoneCard(
+        kicker + ": " + "; ".join(f"{a} {c} {b}" for a, b, c in rows),
+        accent,
+    )
+    card.label(kicker)
+    for index, (title, detail, meta) in enumerate(rows):
+        if index:
+            card.divider()
+        card.row(title, _clip(detail, 140), meta)
+    if footer:
+        card.lines(footer, size=14, color=accent, weight=650)
+        card.y += 4
+    return card.finish()
+
+
+def render_merged_mobile(merged: list[PullRequest], max_rows: int) -> str:
+    """Return the phone merged card: the newest pull requests with their merge dates."""
+    newest = sorted(merged, key=lambda pr: (pr.merged_at, pr.url), reverse=True)
+    if not newest:
+        return _phone_list("0 merged upstream", [EMPTY_MERGED], GREEN, "")
+    shown = newest[: min(max_rows, PHONE_MERGED_ROWS)]
+    rows = [
+        (
+            pr.repo,
+            pr.title,
+            f"PR #{pr.number}" + (f" | {pr.merged_at[:10]}" if pr.merged_at else ""),
+        )
+        for pr in shown
+    ]
+    hidden = len(newest) - len(shown)
+    footer = f"+{_plural(hidden, 'more merged pull request')}" if hidden else ""
+    return _phone_list(
+        f"{len(newest)} merged upstream | newest first", rows, GREEN, footer
+    )
+
+
+def render_review_mobile(open_prs: list[PullRequest], max_rows: int) -> str:
+    """Return the phone in-review card: one row per repository, most open pull requests first."""
+    ordered = _by_repository(open_prs)
+    count = len(open_prs)
+    kicker = f"{count} PR{'' if count == 1 else 's'} in review"
+    if not ordered:
+        return _phone_list(kicker, [EMPTY_REVIEW], AMBER, "")
+    shown = ordered[: min(max_rows, PHONE_REVIEW_ROWS)]
+    rows = [
+        (prs[0].repo, "; ".join(pr.title for pr in prs), _numbers(prs)) for prs in shown
+    ]
+    hidden = sum(len(prs) for prs in ordered[len(shown) :])
+    footer = f"+{_plural(hidden, 'more pull request')} in review" if hidden else ""
+    return _phone_list(kicker, rows, AMBER, footer)
+
+
+# ---------------------------------------------------------------- step summary
+
+
+def _md(text: str) -> str:
+    """Escape untrusted text for one Markdown table cell."""
+    return re.sub(r"([\\`*_\[\]<>|])", r"\\\1", text)
+
+
+def step_summary(
+    username: str,
+    merged: list[PullRequest],
+    open_prs: list[PullRequest],
+    left_out: int,
+) -> str:
+    """Return the Markdown the run page shows: the counts, then every pull request."""
+    stats = summarize(merged, open_prs)
+    lines = [
+        f"### Open source contributions by @{username}",
+        "",
+        "| Merged upstream | In review | Projects | Combined stars |",
+        "| ---: | ---: | ---: | ---: |",
+        f"| {stats['merged']} | {stats['open']} | {stats['projects']} | {stats['stars']:,} |",
+        "",
+        (
+            f"{_plural(left_out, 'pull request')} left out: your own repositories, "
+            "private repositories, `exclude-owners`, `exclude-repos` and `min-stars`."
+        ),
+    ]
+    newest = sorted(merged, key=lambda pr: (pr.merged_at, pr.url), reverse=True)
+    if newest:
+        lines += [
+            "",
+            f"#### Merged ({len(newest)})",
+            "",
+            "| Merged | Repository | Stars | Pull request |",
+            "| --- | --- | ---: | --- |",
+        ]
+        lines += [
+            f"| {pr.merged_at[:10]} | {_md(pr.repo)} | {pr.stars:,} | [#{pr.number}]({pr.url}) {_md(pr.title)} |"
+            for pr in newest
+        ]
+    ordered = [pr for prs in _by_repository(open_prs) for pr in prs]
+    if ordered:
+        lines += [
+            "",
+            f"#### In review ({len(ordered)})",
+            "",
+            "| Repository | Stars | Pull request |",
+            "| --- | ---: | --- |",
+        ]
+        lines += [
+            f"| {_md(pr.repo)} | {pr.stars:,} | [#{pr.number}]({pr.url}) {_md(pr.title)} |"
+            for pr in ordered
+        ]
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- files and outputs
@@ -564,6 +1037,61 @@ def keep_existing(paths: Iterable[Path], exc: Exception) -> int:
     return 0
 
 
+def git(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run one git command in the working directory, capturing its output."""
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+
+
+def commit_cards(paths: Iterable[Path], message: str) -> int:
+    """Commit the cards that changed as github-actions[bot] and push them; return the exit code.
+
+    Only the card files go into the commit, even when other changes are staged.
+    A rejected push (the branch moved during the run) is rebased and retried once.
+    """
+    if git("rev-parse", "--is-inside-work-tree").returncode:
+        print(
+            "::error::commit is true but the working directory is not a git checkout."
+        )
+        return 1
+    branch = git("symbolic-ref", "--quiet", "--short", "HEAD")
+    if branch.returncode:
+        print(
+            "::warning::commit is true but HEAD is detached, as on a pull_request "
+            "run, so the cards were not committed."
+        )
+        return 0
+    name = branch.stdout.strip()
+    files = [str(p) for p in paths if p.is_file()]
+    added = git("add", "--", *files)
+    if added.returncode:
+        print(f"::error::git add failed: {added.stderr.strip()}")
+        return 1
+    if not git("diff", "--cached", "--quiet", "--", *files).returncode:
+        print("No card changed, so there is nothing to commit.")
+        return 0
+    identity = ("-c", f"user.name={BOT_NAME}", "-c", f"user.email={BOT_EMAIL}")
+    done = git(*identity, "commit", "--quiet", "-m", message, "--", *files)
+    if done.returncode:
+        print(f"::error::git commit failed: {(done.stderr or done.stdout).strip()}")
+        return 1
+    for attempt in range(2):
+        pushed = git("push", "--quiet", "origin", f"HEAD:{name}")
+        if not pushed.returncode:
+            print(f"Committed the cards and pushed them to {name}.")
+            return 0
+        if attempt:
+            break
+        rebased = git("pull", "--rebase", "--autostash", "--quiet", "origin", name)
+        if rebased.returncode:
+            git("rebase", "--abort")
+            print(
+                f"::error::could not rebase the cards onto {name}: {rebased.stderr.strip()}"
+            )
+            return 1
+    print(f"::error::could not push the cards to {name}: {pushed.stderr.strip()}")
+    return 1
+
+
 def main(env: Mapping[str, str] | None = None) -> int:
     env = os.environ if env is None else env
     try:
@@ -579,13 +1107,22 @@ def main(env: Mapping[str, str] | None = None) -> int:
         open_prs = search_prs(config.username, "open", config.token)
     except FETCH_ERRORS as exc:
         return keep_existing(config.outputs.values(), exc)
-    owners, repos = config.exclude_owners, config.exclude_repos
-    merged = select_upstream(merged, config.username, owners, repos)
-    open_prs = select_upstream(open_prs, config.username, owners, repos)
+    found = len(merged) + len(open_prs)
+    keep = (
+        config.username,
+        config.exclude_owners,
+        config.exclude_repos,
+        config.min_stars,
+    )
+    merged = select_upstream(merged, *keep)
+    open_prs = select_upstream(open_prs, *keep)
     cards = {
         "summary": render_summary(merged, open_prs, config.accent),
         "merged": render_merged(merged, config.max_rows),
         "review": render_review(open_prs, config.max_rows),
+        "summary-mobile": render_summary_mobile(merged, open_prs, config.accent),
+        "merged-mobile": render_merged_mobile(merged, config.max_rows),
+        "review-mobile": render_review_mobile(open_prs, config.max_rows),
     }
     for card, path in config.outputs.items():
         write(path, cards[card])
@@ -595,6 +1132,12 @@ def main(env: Mapping[str, str] | None = None) -> int:
         f"{stats['projects']} projects with {stats['stars']:,} combined stars"
     )
     set_outputs(env.get("GITHUB_OUTPUT", ""), stats)
+    if summary := env.get("GITHUB_STEP_SUMMARY", ""):
+        left_out = found - len(merged) - len(open_prs)
+        with Path(summary).open("a", encoding="utf-8") as fh:
+            fh.write(step_summary(config.username, merged, open_prs, left_out))
+    if config.commit:
+        return commit_cards(config.outputs.values(), config.commit_message)
     return 0
 
 

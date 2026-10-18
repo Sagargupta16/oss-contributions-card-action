@@ -80,15 +80,18 @@ jobs:
             esac
           done
           python - <<'EOF'
+          import glob
           import xml.etree.ElementTree as ET
-          for path in ("assets/oss.svg", "assets/oss-merged.svg", "assets/oss-review.svg"):
+          paths = sorted(glob.glob("assets/oss*.svg"))
+          assert len(paths) == 6, paths  # three cards, each in a desktop and a phone layout
+          for path in paths:
               root = ET.parse(path).getroot()
               assert root.tag == "{http://www.w3.org/2000/svg}svg", path
               assert root.get("role") == "img" and root.get("aria-label"), path
               print(f"{path}: valid SVG, {root.get('width')}x{root.get('height')}")
           EOF
           for repo in ${EXCLUDE_REPOS//,/ }; do
-            if grep -qiF "$repo" assets/oss.svg assets/oss-merged.svg assets/oss-review.svg; then
+            if grep -qiF "$repo" assets/oss*.svg; then
               echo "::error::$repo is in exclude-repos but still appears on a card"
               exit 1
             fi
