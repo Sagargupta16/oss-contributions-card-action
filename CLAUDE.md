@@ -10,7 +10,7 @@
 
 ## Project
 
-Composite GitHub Action that finds a user's pull requests to other people's repositories through the GitHub GraphQL search API and renders three self-hosted animated SVG cards into the caller's repo, each in an 840px desktop and a 320px phone layout: a summary (counts, combined stars, a chip per project), the merged list, and the in-review list grouped by repository. It also writes a Markdown table to the run's step summary and, with `commit: true`, commits and pushes the cards itself.
+Composite GitHub Action that finds a user's pull requests to other people's repositories through the GitHub GraphQL search API and renders three self-hosted animated SVG cards into the caller's repo, each in an 840px desktop and a 320px phone layout: a summary (counts, combined stars, a chip per project), the merged list, and the in-review list grouped by repository. It also writes a Markdown table to the run's step summary and, with `commit: true`, commits and pushes the cards itself. That is the default `style: classic`; `style: flat` (1.2.0, `flat_style.py`) draws the profile's newer look instead: the summary over a ledger of the six newest merges, and the in-review chips, each at 840 and 320px, with no merged card.
 
 Built 2026-09-25 to publish as `Sagargupta16/oss-contributions-card-action@v1`. The card designs come from `brand/Sagargupta16/scripts/render-svgs.py` (`render_oss`, `render_list_card`, `render_oss_merged`, `render_oss_review`) and the phone layouts from `brand/Sagargupta16/scripts/mobile_cards.py` (`Card`, `_oss`, `_oss_list`), which still render the profile README's own copies from the curated portfolio list.
 
@@ -36,6 +36,8 @@ Regenerate the README previews from live data (Sagargupta16, minus MCA-NITW and 
 GITHUB_TOKEN=$(gh auth token) OSS_USERNAME=Sagargupta16 OSS_EXCLUDE_OWNERS=MCA-NITW OSS_EXCLUDE_REPOS=firstcontributions/first-contributions,emmabostian/developer-portfolios,is-a-dev/register,ossamamehmood/Hacktoberfest,SimplifyJobs/Summer2027-Internships OSS_OUTPUT_SUMMARY=examples/oss.svg OSS_OUTPUT_MERGED=examples/oss-merged.svg OSS_OUTPUT_REVIEW=examples/oss-review.svg OSS_OUTPUT_SUMMARY_MOBILE=examples/oss-mobile.svg OSS_OUTPUT_MERGED_MOBILE=examples/oss-merged-mobile.svg OSS_OUTPUT_REVIEW_MOBILE=examples/oss-review-mobile.svg python oss_contributions_card.py
 ```
 
+The flat previews take the same command with `OSS_STYLE=flat OSS_OUTPUT_SUMMARY=examples/oss-flat.svg OSS_OUTPUT_REVIEW=examples/oss-review-flat.svg OSS_OUTPUT_SUMMARY_MOBILE=examples/oss-flat-mobile.svg OSS_OUTPUT_REVIEW_MOBILE=examples/oss-review-flat-mobile.svg` in place of the six output variables (flat writes no merged card).
+
 ## Test
 
 ```
@@ -43,18 +45,20 @@ uvx ruff@0.17.1 check .
 uv run --no-project --with pytest==9.1.1 pytest -v
 ```
 
-`test_oss_contributions_card.py` never touches the network: every test monkeypatches `fetch` (or calls the pure functions directly). The `commit` tests run real `git` against a bare repo under `tmp_path`, with `GIT_CONFIG_GLOBAL` pointed at a throwaway file so the local signing config stays out. It covers the phone layouts (row caps, `+N more`, wrapping inside 320px), `min-stars`, the step summary, commit (bot identity, only card files, no-change, detached HEAD, rebase on a moved branch, not a checkout), the query string, cursor pagination, the page cap, duplicate results, GraphQL errors, the https allowlist, owner, repository (exact, `owner/*`, case, empty input) and private-repo exclusion, star ranking, the `+N more` chip, grouping, max-rows, empty cards, SVG validity, escaping, dash and emoji normalization, config validation, `$GITHUB_OUTPUT`, and the keep-existing-cards fallback for five failure shapes.
+`test_oss_contributions_card.py` never touches the network: every test monkeypatches `fetch` (or calls the pure functions directly). The `commit` tests run real `git` against a bare repo under `tmp_path`, with `GIT_CONFIG_GLOBAL` pointed at a throwaway file so the local signing config stays out. It covers the phone layouts (row caps, `+N more`, wrapping inside 320px), `min-stars`, the step summary, commit (bot identity, only card files, no-change, detached HEAD, rebase on a moved branch, not a checkout), the query string, cursor pagination, the page cap, duplicate results, GraphQL errors, the https allowlist, owner, repository (exact, `owner/*`, case, empty input) and private-repo exclusion, star ranking, the `+N more` chip, grouping, max-rows, empty cards, SVG validity, escaping, dash and emoji normalization, config validation, `$GITHUB_OUTPUT`, and the keep-existing-cards fallback for five failure shapes. For `style`: `CLASSIC_SHA256` pins the six classic cards to what 1.1.0 writes for `live_api()`, and the flat cards are checked for poster-safe entrances, loops on `flat_style.CLOCK`, the 10.5px desktop and 11.5px phone floor, no gradient or shine, 840 and 320px widths, phone text inside the card, the tiles, ledger, review chips, `max-rows`, alt text, empty cards and escaping.
 
-`.github/workflows/ci.yml` runs three jobs on every push to `main` and every PR: `lint` (ruff), `test` (pytest on 3.12/3.13/3.14/3.15) and `action`, the only job that loads `action.yml`. It runs `uses: ./` as Sagargupta16 with the workflow token, `exclude-owners: MCA-NITW` and the job-level `EXCLUDE_REPOS` list as `exclude-repos`, then asserts all four outputs are numbers, all six SVGs parse, and no excluded repository appears on a card. `ruff==0.17.1` and `pytest==9.1.1` are pinned inline, because Renovate does not read `run:` blocks; bump them by hand, the same way as in `credly-badge-readme-action`. There is no `ruff.toml` on purpose: the tree passes ruff's full default ruleset.
+`.github/workflows/ci.yml` runs three jobs on every push to `main` and every PR: `lint` (ruff), `test` (pytest on 3.12/3.13/3.14/3.15) and `action`, the only job that loads `action.yml`. It runs `uses: ./` as Sagargupta16 with the workflow token, `exclude-owners: MCA-NITW` and the job-level `EXCLUDE_REPOS` list as `exclude-repos`, then asserts all four outputs are numbers, all six SVGs parse, and no excluded repository appears on a card. It then runs `uses: ./` again with `style: flat` into `flat/` and checks those four cards the same way. `ruff==0.17.1` and `pytest==9.1.1` are pinned inline, because Renovate does not read `run:` blocks; bump them by hand, the same way as in `credly-badge-readme-action`. There is no `ruff.toml` on purpose: the tree passes ruff's full default ruleset.
 
 ## Entry points
 
 - `action.yml` -- the contract: inputs, outputs, Python 3.13, inputs mapped to env vars, runs the script
 - `oss_contributions_card.py` -- all of the logic: config, GraphQL search, filtering, rendering, writing files and `$GITHUB_OUTPUT`
+- `flat_style.py` -- the `style: flat` cards only, imported by the script (it sits beside it, so `python <script>` finds it). Pure: `render(facts, today, max_rows)` returns `{output key: svg}`
 
 ## Key files
 
-- `oss_contributions_card.py` -- `load_config` (inputs), `search_prs` (pagination), `select_upstream` (exclusion and `min-stars`), `render_summary` / `render_merged` / `render_review` (desktop cards), `PhoneCard` and `render_*_mobile` (phone cards), `step_summary` (run page table), `commit_cards` (git add, commit, push), `main` (fallback and outputs)
+- `oss_contributions_card.py` -- `load_config` (inputs), `search_prs` (pagination), `select_upstream` (exclusion and `min-stars`), `render_summary` / `render_merged` / `render_review` (desktop cards), `PhoneCard` and `render_*_mobile` (phone cards), `step_summary` (run page table), `commit_cards` (git add, commit, push), `render_flat` (the facts the flat cards read), `main` (fallback and outputs)
+- `flat_style.py` -- a port of the profile's `scripts/kit.py` (palette, type, clock, poster-safe `group`, `chip`, `text_width`, `wrap_text`) and `scripts/cards/oss.py` (`_summary`, `_ledger`, `_review`, `_summary_phone`, `_review_phone`), minus the community line and co-authored commit counting, which the action has no data for
 - `examples/*.svg` -- README previews, generated from live data by the command under Run; never edit them by hand
 
 ## Gotchas
@@ -75,6 +79,9 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 - `commit_cards` passes the card paths after `--` to `git commit`, so only the cards are committed even when the caller staged other files. It pushes `HEAD:<branch>` to `origin`, which relies on the credentials `actions/checkout` persists by default.
 - The phone layouts use single spaces around `|`: `wrap_text` splits on whitespace, so a double space collapses anyway.
 - `v1` is a moving major tag: after cutting `v1.x.y`, move `v1` to it and update `CHANGELOG.md`.
+- The default style must stay byte-identical for everyone on `@v1`. Never change a classic render function's output, and never update `CLASSIC_SHA256` to make a test pass; a new look goes behind `style`.
+- `flat_style.py` follows the profile's `kit.py` and `cards/oss.py`; if the profile's open-source cards change, port the change. Two deliberate differences: the phone ledger's ring loops on 12 s for up to three rows and 24 s otherwise (the profile always has six rows, 24 s), and a review chip leaves room for the `+N more` chip after it, so a very long repository name never empties the chip row.
+- With `style: flat`, `load_config` drops the `merged` and `merged-mobile` outputs, so the fallback and `commit` never wait on a merged card. `accent` is not applied to flat cards, and the flat summary shows the run's UTC date, so it changes every day.
 
 ## Repo-specific rules
 
@@ -83,9 +90,9 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 
 ## Usage
 
-- In a workflow: `uses: Sagargupta16/oss-contributions-card-action@v1` with `commit: true`, optionally with `exclude-owners`, `exclude-repos` and `min-stars`. Without `commit`, the consumer workflow commits the SVGs itself (see the README).
+- In a workflow: `uses: Sagargupta16/oss-contributions-card-action@v1` with `commit: true`, optionally with `exclude-owners`, `exclude-repos`, `min-stars` and `style: flat`. Without `commit`, the consumer workflow commits the SVGs itself (see the README).
 - Standalone: see Run.
 
 ## Config
 
-- No config file. Everything flows action input -> env var -> script: `OSS_USERNAME`, `GITHUB_TOKEN` (or `GH_TOKEN` by hand), `OSS_EXCLUDE_OWNERS`, `OSS_EXCLUDE_REPOS`, `OSS_OUTPUT_SUMMARY`, `OSS_OUTPUT_MERGED`, `OSS_OUTPUT_REVIEW`, `OSS_OUTPUT_SUMMARY_MOBILE`, `OSS_OUTPUT_MERGED_MOBILE`, `OSS_OUTPUT_REVIEW_MOBILE`, `OSS_MAX_ROWS`, `OSS_ACCENT`, `OSS_MIN_STARS`, `OSS_COMMIT`, `OSS_COMMIT_MESSAGE`. The runner provides `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY`.
+- No config file. Everything flows action input -> env var -> script: `OSS_USERNAME`, `GITHUB_TOKEN` (or `GH_TOKEN` by hand), `OSS_EXCLUDE_OWNERS`, `OSS_EXCLUDE_REPOS`, `OSS_OUTPUT_SUMMARY`, `OSS_OUTPUT_MERGED`, `OSS_OUTPUT_REVIEW`, `OSS_OUTPUT_SUMMARY_MOBILE`, `OSS_OUTPUT_MERGED_MOBILE`, `OSS_OUTPUT_REVIEW_MOBILE`, `OSS_MAX_ROWS`, `OSS_ACCENT`, `OSS_STYLE`, `OSS_MIN_STARS`, `OSS_COMMIT`, `OSS_COMMIT_MESSAGE`. The runner provides `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY`.

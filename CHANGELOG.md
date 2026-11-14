@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.0] - 2026-11-14
+
+### Added
+
+- `style` input: `classic` (the default) or `flat`. `flat` draws the newer look of the profile README these cards come from, ported from its design kit and open-source cards into `flat_style.py`: flat cards with one fill and one hairline border, mono micro-labels (10.5px on desktop, 11.5px on a phone), one blue family, green only on the newest merge and amber only on work in review, no gradient or shine. Every loop lasts 2, 3, 4, 6, 12 or 24 s, and every entrance is poster-safe, so a still render shows the whole card.
+- With `style: flat` the summary card (`output-summary`, `output-summary-mobile`) shows four tiles (merged upstream, repositories with merges, combined stars, open pull requests), FIRST MERGE and UPDATED labels, and a ledger of the six newest merges with their number, title, date and stars, the newest marked green. Five rows are in view and the ledger steps up a row every 4 s. ALSO MERGED INTO names up to three repositories the ledger does not show, and a "+N more pull requests on GitHub" line counts the rest. The in-review card (`output-review`, `output-review-mobile`) shows a chip per repository with its open pull request count and stars, the most starred first. The phone layouts are 320px wide with the same tiles, rail and chips.
+- `max-rows` caps the flat ledger (six at most) and the repositories on the flat in-review cards.
+- Flat previews in `examples/` (`oss-flat.svg`, `oss-review-flat.svg` and their `-mobile` layouts), rendered from live data on 2026-11-14.
+- Tests for the flat cards (poster-safe entrances, loops on the clock, the text size floor, no gradient or shine, 320px phone width, text inside the phone card), and a test that the default style still writes the same bytes as 1.1.0.
+- CI's `action` job also runs the action with `style: flat` and checks its four cards.
+
+### Changed
+
+- Nothing for existing workflows: without `style`, or with `style: classic`, every card is byte-identical to 1.1.0. `flat` writes no merged card, since its summary carries the merged list, and leaves `accent` unused. The flat summary shows the run's date, so it changes on every run.
+
 ## [1.1.0] - 2026-10-18
 
 ### Added

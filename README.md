@@ -13,6 +13,8 @@ It writes three cards, each in an 840px desktop layout and a 320px phone layout:
 - **Merged**: repository, title and number of every merged pull request, newest first.
 - **In review**: open pull requests, grouped by repository.
 
+That is the classic style, the default. Set `style: flat` for the newer look of the profile README these cards come from: a summary card over a ledger of your newest merges, and the in-review card, each in both layouts. See [Flat style](#flat-style).
+
 The cards are committed to your repo (the action can do the commit for you), so there is no widget host to run out of quota or go down. Each SVG is self-contained (CSS and SMIL animation only, no scripts, fonts or external images), which is what GitHub needs to render it through an `<img>`.
 
 It is published on the [GitHub Marketplace](https://github.com/marketplace/actions/oss-contributions-card).
@@ -41,6 +43,32 @@ Live output for [@Sagargupta16](https://github.com/Sagargupta16), rendered on 20
 An 840px card scaled down to a phone screen shrinks its text to a few pixels. The phone layouts are 320px wide, so they render close to their real size: the tiles go two by two, titles wrap instead of being clipped, and the lists show the newest six merged pull requests and the top five repositories in review. Open this page on a phone and the previews above switch to them; on a desktop, here are two of them side by side:
 
 <img src="examples/oss-mobile.svg" width="300" alt="Phone layout of the summary card" /> <img src="examples/oss-merged-mobile.svg" width="300" alt="Phone layout of the merged card" />
+
+## Flat style
+
+`style: flat` draws the look of the [@Sagargupta16 profile README](https://github.com/Sagargupta16) these cards come from: flat cards with one fill and one hairline border, mono micro-labels, one blue family, green only on your newest merge and amber only on work in review. It writes two cards, each in an 840px and a 320px layout:
+
+- **Summary** (`output-summary`, `output-summary-mobile`): four tiles (merged upstream, repositories with merges, their combined stars, open pull requests) over a ledger of your six newest merges, each with its repository, number, title, merge date and stars, the newest marked green. Five rows are in view and the ledger steps up a row every 4 seconds; a still image shows the newest five. Under it, ALSO MERGED INTO names up to three of the repositories the ledger does not show, the most starred first, and a "+N more pull requests on GitHub" line counts the rest. The card opens with the date of your first merge and the date of the run.
+- **In review** (`output-review`, `output-review-mobile`): one chip per repository with open pull requests, the most starred first, with its open pull request count and stars, under an amber IN REVIEW mark. A light visits each chip in turn.
+
+```yaml
+      - uses: Sagargupta16/oss-contributions-card-action@v1
+        with:
+          commit: true
+          style: flat
+```
+
+The summary already carries the merged list, so this style writes no merged card and ignores `output-merged` and `output-merged-mobile`. `accent` applies to the classic style only. Every animation loops on 2, 3, 4, 6, 12 or 24 seconds, and a still render (a link preview, a viewer without animation) shows the whole card.
+
+Live output for [@Sagargupta16](https://github.com/Sagargupta16), rendered on 2026-11-14 with the same exclusions as the classic preview:
+
+<picture><source media="(max-width: 600px)" srcset="examples/oss-flat-mobile.svg" /><img src="examples/oss-flat.svg" width="100%" alt="Flat open source summary: four tiles over a ledger of the newest merged pull requests" /></picture>
+
+<picture><source media="(max-width: 600px)" srcset="examples/oss-review-flat-mobile.svg" /><img src="examples/oss-review-flat.svg" width="100%" alt="Flat in-review card: repositories with open pull requests and their counts" /></picture>
+
+<img src="examples/oss-flat-mobile.svg" width="300" alt="Phone layout of the flat summary card" /> <img src="examples/oss-review-flat-mobile.svg" width="300" alt="Phone layout of the flat in-review card" />
+
+To embed them, use the summary and in-review snippets under [Embed](#embed). Switching an existing README from classic: remove the merged card's `<picture>`, and delete `assets/oss-merged.svg` and `assets/oss-merged-mobile.svg`, which the action no longer updates.
 
 ## Quick start
 
@@ -146,13 +174,14 @@ If you exclude anything, add the same exclusions to each link so the search list
 | `exclude-owners` | `""` | Comma-separated owners whose repositories do not count, for example your own organizations |
 | `exclude-repos` | `""` | Comma-separated repositories that do not count, as `owner/repo`, or `owner/*` for every repository of an owner. Case-insensitive |
 | `output-summary` | `assets/oss.svg` | Path of the summary card. An empty string skips it |
-| `output-merged` | `assets/oss-merged.svg` | Path of the merged card. An empty string skips it |
+| `output-merged` | `assets/oss-merged.svg` | Path of the merged card. An empty string skips it. `style: flat` does not write it |
 | `output-review` | `assets/oss-review.svg` | Path of the in-review card. An empty string skips it |
 | `output-summary-mobile` | `assets/oss-mobile.svg` | Path of the 320px phone layout of the summary card. An empty string skips it |
-| `output-merged-mobile` | `assets/oss-merged-mobile.svg` | Path of the phone layout of the merged card. An empty string skips it |
+| `output-merged-mobile` | `assets/oss-merged-mobile.svg` | Path of the phone layout of the merged card. An empty string skips it. `style: flat` does not write it |
 | `output-review-mobile` | `assets/oss-review-mobile.svg` | Path of the phone layout of the in-review card. An empty string skips it |
-| `max-rows` | `12` | Most rows on each list card. The rest are summed in a footer line |
-| `accent` | `""` | Hex color for the summary card's heading and project chips, for example `#a78bfa`. Empty keeps the stock blue. The merged and in-review cards stay green and amber so status reads at a glance |
+| `max-rows` | `12` | Most rows on each list card. The rest are summed in a footer line. With `style: flat` it caps the ledger (six at most) and the repositories on the in-review cards |
+| `accent` | `""` | Hex color for the summary card's heading and project chips, for example `#a78bfa`. Empty keeps the stock blue. The merged and in-review cards stay green and amber so status reads at a glance. Classic style only |
+| `style` | `classic` | `classic`, the look since v1.0.0, or `flat`, the profile README's newer look: the summary over a ledger of the newest merges, and the in-review chips. `flat` writes no merged card. See [Flat style](#flat-style) |
 | `min-stars` | `0` | Leave out repositories with fewer stars than this. `0` keeps every repository |
 | `commit` | `false` | `true` commits the changed cards as `github-actions[bot]` and pushes them to the checked-out branch. Needs `permissions: contents: write` |
 | `commit-message` | `chore: refresh oss contribution cards` | Commit message used when `commit` is `true` |
@@ -188,8 +217,8 @@ flowchart LR
 
 1. Runs two GitHub GraphQL searches, `is:pr author:USER is:merged -user:USER` and the same with `is:open`, following the cursor 100 results at a time.
 2. Drops pull requests to repositories you own, to anything matched by `exclude-owners` or `exclude-repos` (case-insensitive), to repositories under `min-stars`, and to private repositories, even when the token can see them.
-3. Renders the three cards in both layouts. Projects are ranked by stars; merged pull requests are ordered by merge date; open ones are grouped by repository, the repository with the most open pull requests first.
-4. Writes each card only when its content changed, so a quiet day produces no commit, and writes the run summary.
+3. Renders the three cards in both layouts (two with `style: flat`). Projects are ranked by stars; merged pull requests are ordered by merge date; open ones are grouped by repository, the repository with the most open pull requests first.
+4. Writes each card only when its content changed, so with `style: classic` a quiet day produces no commit (the flat summary carries an UPDATED date, so it changes once a day), and writes the run summary.
 5. With `commit: true`, commits the changed cards and pushes them.
 
 If the GitHub API fails (network error, HTTP error, rate limit, a GraphQL error), the action keeps the cards already in your repo, prints a warning and exits 0, so a flaky API never blanks your README. If a card does not exist yet, there is nothing to keep, and it exits 1 with a message naming the missing file.
@@ -203,6 +232,7 @@ Pull request titles are untrusted text: they are HTML-escaped before they go int
 - **Everything the search finds counts** unless you exclude it. That includes one-line additions to lists such as first-contributions, awesome lists or portfolio collections: see [Leave out list repositories](#leave-out-list-repositories).
 - **Stars are today's stars**, not the count when your pull request merged.
 - **The summary card shows four rows of project chips**, and its phone layout the top 12 projects. When there are more projects than fit, the last chip reads `+N more`. The tile above still counts every project.
+- **The flat summary shows the newest six merges** and names three more repositories; the tiles still count everything. It shows the date of the run, so it changes, and with `commit: true` is committed, on every run. Its in-review card shows three rows of chips on a desktop and six repositories on a phone, then `+N more`.
 - **The search link cannot filter by stars.** GitHub search has no stars qualifier for pull requests, so with `min-stars` set, the linked search lists more than the card.
 - **Only pull requests you opened.** Reviews, issues and commits co-authored on someone else's pull request are not counted, and pull requests closed without merging are not shown.
 
