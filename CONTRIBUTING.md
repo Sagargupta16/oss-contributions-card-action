@@ -1,6 +1,6 @@
 # Contributing to oss-contributions-card-action
 
-This repo is a composite GitHub Action that finds your pull requests to other people's repositories and renders three self-hosted, animated SVG cards, each in a desktop and a phone layout: a summary, the merged list and the in-review list. Bug reports, fixes, doc corrections and new inputs that come with tests are welcome.
+This repo is a composite GitHub Action that finds your pull requests to other people's repositories and renders three self-hosted, animated SVG cards, each in a desktop and a phone layout: a summary, the merged list and the in-review list. `style: flat` draws the profile README's newer look from `flat_style.py` instead. Bug reports, fixes, doc corrections and new inputs that come with tests are welcome.
 
 ## Setup
 
@@ -12,7 +12,7 @@ CI (`.github/workflows/ci.yml`) runs three jobs on every push to `main` and ever
 
 - `lint`: `pip install --only-binary :all: ruff==0.17.1`, then `ruff check .` on Python 3.13
 - `test`: `pip install --only-binary :all: pytest==9.1.1`, then `pytest -v` on Python 3.12, 3.13, 3.14 and 3.15
-- `action`: runs `action.yml` from the checkout against the live search API with `exclude-owners` and `exclude-repos` set, then asserts all four outputs are numbers, all six SVGs parse, and no excluded repository appears on a card
+- `action`: runs `action.yml` from the checkout against the live search API with `exclude-owners` and `exclude-repos` set, then asserts all four outputs are numbers, all six SVGs parse, and no excluded repository appears on a card; then runs it again with `style: flat` and checks those four cards
 
 Run the first two locally:
 
@@ -38,6 +38,7 @@ That writes `assets/oss.svg`, `assets/oss-merged.svg`, `assets/oss-review.svg` a
 - The username env var is `OSS_USERNAME`, never `USERNAME`, because Windows already sets `USERNAME`.
 - Composite outputs need a `value:` mapping to `steps.render.outputs.<name>` and `id: render` on the step.
 - Keep the script standard library only. Any third-party import breaks every consumer.
+- The default `style: classic` must stay byte-identical for everyone on `@v1`: `CLASSIC_SHA256` in the tests pins it, so never update those hashes to make a test pass. A new look goes behind `style`, in `flat_style.py` or a new value.
 - Never print the token, and send it only in the `Authorization` header of a request to an `ALLOWED_HOSTS` URL.
 - `FETCH_ERRORS` lists the failures that keep the existing cards. Do not widen it to a bare `except`.
 - Pull request titles are untrusted: they pass through `plain()` and `html.escape` before reaching an SVG. Keep the source plain ASCII; the dash table is built from integer code points for that reason.

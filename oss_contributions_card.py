@@ -11,6 +11,10 @@ phone layout:
 - the merged pull requests, newest first
 - the pull requests in review, grouped by repository
 
+That is the classic style. OSS_STYLE=flat draws the profile README's newer
+look instead (flat_style.py): the summary over a ledger of the newest merges,
+and the review card, each in both layouts; it writes no merged card.
+
 GitHub serves README images through an <img>, so every card is self-contained:
 no scripts, no external fonts or images, CSS and SMIL animation only.
 
@@ -40,8 +44,11 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
+
+import flat_style
 
 # Palette and fonts of the profile README cards these designs come from: warm
 # near-black, one blue family, green for merged work, amber for work in review.
@@ -67,6 +74,9 @@ OUTPUTS = (
     ("merged-mobile", "OSS_OUTPUT_MERGED_MOBILE", "assets/oss-merged-mobile.svg"),
     ("review-mobile", "OSS_OUTPUT_REVIEW_MOBILE", "assets/oss-review-mobile.svg"),
 )
+STYLES = ("classic", "flat")
+# The flat summary carries the merged ledger, so that style has no merged card.
+FLAT_CARDS = ("summary", "review", "summary-mobile", "review-mobile")
 COMMIT_MESSAGE = "chore: refresh oss contribution cards"
 # The identity actions/checkout documents for commits made by the workflow token.
 BOT_NAME = "github-actions[bot]"
@@ -161,6 +171,7 @@ class Config:
     min_stars: int = 0
     commit: bool = False
     commit_message: str = COMMIT_MESSAGE
+    style: str = "classic"
 
 
 def _whole_number(
@@ -188,10 +199,14 @@ def load_config(env: Mapping[str, str]) -> Config:
         raise ConfigError(
             "no token: set the token input, or GITHUB_TOKEN when running by hand"
         )
+    style = (env.get("OSS_STYLE") or "classic").strip().lower()
+    if style not in STYLES:
+        raise ConfigError(f"style must be classic or flat, got {style!r}")
     outputs = {
         card: Path(path)
         for card, name, default in OUTPUTS
         if (path := env.get(name, default).strip())
+        and (style == "classic" or card in FLAT_CARDS)
     }
     if not outputs:
         raise ConfigError("every output path is empty, so there is nothing to render")
@@ -226,6 +241,7 @@ def load_config(env: Mapping[str, str]) -> Config:
         min_stars=min_stars,
         commit=commit == "true",
         commit_message=message,
+        style=style,
     )
 
 
@@ -947,6 +963,39 @@ def render_review_mobile(open_prs: list[PullRequest], max_rows: int) -> str:
     return _phone_list(kicker, rows, AMBER, footer)
 
 
+# ---------------------------------------------------------------- flat style
+
+
+def render_flat(
+    merged: list[PullRequest],
+    open_prs: list[PullRequest],
+    max_rows: int,
+    today: str,
+) -> dict[str, str]:
+    """Return the flat style's cards, keyed like OUTPUTS: the summary over the merged ledger, and the review chips."""
+
+    def row(pr: PullRequest) -> dict:
+        return {
+            "repo": pr.repo,
+            "title": pr.title,
+            "number": pr.number,
+            "date": pr.merged_at[:10],
+            "stars": pr.stars,
+        }
+
+    stats = summarize(merged, open_prs)
+    newest = sorted(merged, key=lambda pr: (pr.merged_at, pr.url), reverse=True)
+    facts = {
+        "merged": [row(pr) for pr in newest],
+        "open": [row(pr) for pr in open_prs],
+        "merged_count": stats["merged"],
+        "open_count": stats["open"],
+        "repos": stats["projects"],
+        "combined_stars": stats["stars"],
+    }
+    return flat_style.render(facts, today, max_rows)
+
+
 # ---------------------------------------------------------------- step summary
 
 
@@ -1116,14 +1165,18 @@ def main(env: Mapping[str, str] | None = None) -> int:
     )
     merged = select_upstream(merged, *keep)
     open_prs = select_upstream(open_prs, *keep)
-    cards = {
-        "summary": render_summary(merged, open_prs, config.accent),
-        "merged": render_merged(merged, config.max_rows),
-        "review": render_review(open_prs, config.max_rows),
-        "summary-mobile": render_summary_mobile(merged, open_prs, config.accent),
-        "merged-mobile": render_merged_mobile(merged, config.max_rows),
-        "review-mobile": render_review_mobile(open_prs, config.max_rows),
-    }
+    if config.style == "flat":
+        today = datetime.now(UTC).date().isoformat()
+        cards = render_flat(merged, open_prs, config.max_rows, today)
+    else:
+        cards = {
+            "summary": render_summary(merged, open_prs, config.accent),
+            "merged": render_merged(merged, config.max_rows),
+            "review": render_review(open_prs, config.max_rows),
+            "summary-mobile": render_summary_mobile(merged, open_prs, config.accent),
+            "merged-mobile": render_merged_mobile(merged, config.max_rows),
+            "review-mobile": render_review_mobile(open_prs, config.max_rows),
+        }
     for card, path in config.outputs.items():
         write(path, cards[card])
     stats = summarize(merged, open_prs)

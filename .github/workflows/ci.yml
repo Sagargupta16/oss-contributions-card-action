@@ -97,3 +97,38 @@ jobs:
             fi
           done
           echo "No excluded repository appears on any card."
+
+      - name: Run the action again with style flat
+        uses: ./
+        with:
+          username: Sagargupta16
+          token: ${{ github.token }}
+          exclude-owners: MCA-NITW
+          exclude-repos: ${{ env.EXCLUDE_REPOS }}
+          style: flat
+          output-summary: flat/oss.svg
+          output-review: flat/oss-review.svg
+          output-summary-mobile: flat/oss-mobile.svg
+          output-review-mobile: flat/oss-review-mobile.svg
+
+      - name: Assert the four flat cards exist and parse
+        run: |
+          set -euo pipefail
+          python - <<'EOF'
+          import glob
+          import xml.etree.ElementTree as ET
+          paths = sorted(glob.glob("flat/*.svg"))
+          assert len(paths) == 4, paths  # flat has no merged card
+          for path in paths:
+              root = ET.parse(path).getroot()
+              assert root.tag == "{http://www.w3.org/2000/svg}svg", path
+              assert root.get("role") == "img" and root.get("aria-label"), path
+              assert root.get("width") == ("320" if path.endswith("-mobile.svg") else "840"), path
+              print(f"{path}: valid SVG, {root.get('width')}x{root.get('height')}")
+          EOF
+          for repo in ${EXCLUDE_REPOS//,/ }; do
+            if grep -qiF "$repo" flat/*.svg; then
+              echo "::error::$repo is in exclude-repos but still appears on a flat card"
+              exit 1
+            fi
+          done

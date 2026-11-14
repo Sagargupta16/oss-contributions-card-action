@@ -28,7 +28,7 @@ inputs:
     required: false
     default: "assets/oss.svg"
   output-merged:
-    description: "Path of the merged list card. An empty string skips it"
+    description: "Path of the merged list card. An empty string skips it. style flat does not write it"
     required: false
     default: "assets/oss-merged.svg"
   output-review:
@@ -40,7 +40,7 @@ inputs:
     required: false
     default: "assets/oss-mobile.svg"
   output-merged-mobile:
-    description: "Path of the 320px phone layout of the merged card. An empty string skips it"
+    description: "Path of the 320px phone layout of the merged card. An empty string skips it. style flat does not write it"
     required: false
     default: "assets/oss-merged-mobile.svg"
   output-review-mobile:
@@ -48,13 +48,17 @@ inputs:
     required: false
     default: "assets/oss-review-mobile.svg"
   max-rows:
-    description: "Most rows on each list card; the rest are summed in a footer line"
+    description: "Most rows on each list card; the rest are summed in a footer line. With style flat it caps the ledger (six at most) and the repositories on the in-review cards"
     required: false
     default: "12"
   accent:
-    description: "Hex color for the summary card's heading and project chips, for example #a78bfa. Empty keeps the stock blue"
+    description: "Hex color for the summary card's heading and project chips, for example #a78bfa. Empty keeps the stock blue. Classic style only"
     required: false
     default: ""
+  style:
+    description: "classic (the look since v1.0.0) or flat (the profile README's newer look: the summary over a ledger of the newest merges, and the in-review chips, each at 840 and 320px). flat writes no merged card"
+    required: false
+    default: "classic"
   min-stars:
     description: "Leave out repositories with fewer stars than this, for example 50. 0 keeps every repository"
     required: false
@@ -106,6 +110,7 @@ runs:
         OSS_OUTPUT_REVIEW_MOBILE: ${{ inputs.output-review-mobile }}
         OSS_MAX_ROWS: ${{ inputs.max-rows }}
         OSS_ACCENT: ${{ inputs.accent }}
+        OSS_STYLE: ${{ inputs.style }}
         OSS_MIN_STARS: ${{ inputs.min-stars }}
         OSS_COMMIT: ${{ inputs.commit }}
         OSS_COMMIT_MESSAGE: ${{ inputs.commit-message }}
